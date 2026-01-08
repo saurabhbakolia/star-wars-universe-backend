@@ -24,6 +24,8 @@ const characterDataSchema = z.object({
  * Generate an AI image for a character
  */
 router.post('/generate', async (req: Request, res: Response) => {
+  console.log('🔥 [POST /generate] Image generation endpoint called');
+  console.log('🔥 [POST /generate] Character:', req.body?.name);
   try {
     // Validate request body
     const characterData = characterDataSchema.parse(req.body);
@@ -100,13 +102,27 @@ router.post('/generate', async (req: Request, res: Response) => {
 /**
  * GET /api/images/:characterId
  * Get cached image for a character
+ * IMPORTANT: This endpoint ONLY returns cached images from the database.
+ * It NEVER generates new images. If no cached image exists, it returns 404.
+ * Image generation must be done via POST /api/images/generate
  */
 router.get('/:characterId', async (req: Request, res: Response) => {
+  console.log('📦 [GET /:characterId] Fetching cached image for:', req.params.characterId);
   try {
     const { characterId } = req.params;
+    
+    // Prevent this route from matching /generate
+    if (characterId === 'generate') {
+      return res.status(404).json({
+        success: false,
+        error: 'Use POST /api/images/generate to generate images',
+      });
+    }
+    
     let cachedImage = null;
     
     try {
+      // ONLY look for cached images - NEVER generate new ones
       cachedImage = await CharacterImage.findOne({ characterId });
     } catch (dbError) {
       // MongoDB not available
@@ -116,17 +132,23 @@ router.get('/:characterId', async (req: Request, res: Response) => {
       });
     }
 
+    // If no cached image exists, return 404 - do NOT generate
     if (!cachedImage) {
+      console.log('📦 [GET /:characterId] No cached image found, returning 404');
       return res.status(404).json({
         success: false,
         error: 'Image not found for this character',
       });
     }
+    
+    console.log('📦 [GET /:characterId] Returning cached image');
 
+    // Return the cached image
     res.json({
       success: true,
       imageUrl: cachedImage.imageUrl,
       characterName: cachedImage.characterName,
+      cached: true, // Explicitly mark as cached
       createdAt: cachedImage.createdAt,
     });
   } catch (error) {

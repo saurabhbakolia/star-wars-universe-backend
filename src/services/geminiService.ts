@@ -53,157 +53,313 @@ Make it visually striking with a Star Wars universe atmosphere.`;
   }
 
   /**
-   * Generate image using Gemini Imagen API
-   * Note: The exact endpoint format may vary based on Gemini API version
-   * Adjust the endpoint URL if needed based on Google's current documentation
+   * List available models from Gemini API
+   * Useful for debugging and finding available image generation models
+   */
+  async listAvailableModels(): Promise<any[]> {
+    try {
+      const API_KEY = getApiKey();
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`;
+      
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        throw new Error(`Failed to list models: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.models) {
+        // Filter for models that might support image generation
+        const imageModels = data.models.filter((model: any) => 
+          model.name?.toLowerCase().includes('image') || 
+          model.name?.toLowerCase().includes('imagen') ||
+          model.supportedGenerationMethods?.includes('generateContent')
+        );
+        
+        console.log('📋 Available models:', data.models.map((m: any) => m.name).join(', '));
+        if (imageModels.length > 0) {
+          console.log('🖼️ Models potentially supporting image generation:', imageModels.map((m: any) => m.name).join(', '));
+        }
+        
+        return data.models;
+      }
+      return [];
+    } catch (error) {
+      console.error('❌ Error listing models:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Generate image using Google's Imagen API or alternative methods
+   * Note: The gemini-2.0-flash-preview-image-generation model was deprecated.
+   * This method tries multiple approaches to generate images.
    */
   async generateCharacterImage(character: CharacterData): Promise<string> {
     try {
       // Generate the prompt
       const prompt = this.generateImagePrompt(character);
-
-      // Try the Imagen API endpoint
-      // If this doesn't work, check Google's documentation for the correct endpoint
       const API_KEY = getApiKey();
-      const imagenEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:generateImages?key=${API_KEY}`;
       
-      console.log('Attempting to generate image with prompt:', prompt.substring(0, 100) + '...');
+      console.log('🎨 Attempting to generate image with prompt:', prompt.substring(0, 100) + '...');
       
-      const response = await fetch(imagenEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: prompt,
-          number_of_images: 1,
-          aspect_ratio: '1:1',
-        }),
-      });
+      // Default models to try if we can't find any via API
+      // Note: Most Gemini models don't support image generation - Google's image generation
+      // is typically done through Imagen API (Vertex AI), which requires different setup
+      const defaultModelsToTry = [
+        'gemini-3-pro-image-preview',
+        'gemini-2.5-flash-exp',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-pro-latest'
+      ];
 
-      const responseText = await response.text();
-      
-      if (!response.ok) {
-        console.error('Gemini API Error Response:', responseText);
-        console.error('Response status:', response.status);
-        
-        // Try alternative endpoint (Imagen 4)
-        console.log('Trying alternative Imagen 4 endpoint...');
-        return this.tryAlternativeEndpoint(prompt);
-      }
+      let modelsToTry: string[] = [];
+      let lastError: Error | null = null;
 
-      let data;
+      // First, try to list available models to see what's actually available
       try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('Failed to parse JSON response:', responseText);
-        throw new Error('Invalid JSON response from API');
-      }
-      
-      // Handle different possible response formats
-      if (data.generatedImages && data.generatedImages[0]) {
-        const imageBase64 = data.generatedImages[0].imageBase64 || 
-                           data.generatedImages[0].bytesBase64Encoded ||
-                           data.generatedImages[0].bytes;
-        if (imageBase64) {
-          return `data:image/png;base64,${imageBase64}`;
+        console.log('🔍 Checking available models...');
+        const availableModels = await this.listAvailableModels();
+        
+        // Look for any model that might support image generation
+        const imageGenModel = availableModels.find((model: any) => 
+          model.name?.toLowerCase().includes('image') || 
+          model.name?.toLowerCase().includes('imagen')
+        );
+        
+        if (imageGenModel) {
+          console.log(`✅ Found potential image generation model: ${imageGenModel.name}`);
+          const modelName = imageGenModel.name.replace('models/', '');
+          modelsToTry.push(modelName);
+        } else {
+          // If no image-specific model found, try common models
+          console.log('⚠️ No image-specific models found, will try common models...');
+          modelsToTry = [...defaultModelsToTry];
         }
+      } catch (listError) {
+        console.log('⚠️ Could not list models, using default list...');
+        modelsToTry = [...defaultModelsToTry];
       }
-      
-      // Alternative response format check
-      if (data.predictions && data.predictions[0]) {
-        const imageBase64 = data.predictions[0].bytesBase64Encoded || 
-                           data.predictions[0].imageBase64 ||
-                           data.predictions[0].bytes;
-        if (imageBase64) {
-          return `data:image/png;base64,${imageBase64}`;
+
+      // If modelsToTry is still empty, use defaults
+      if (modelsToTry.length === 0) {
+        modelsToTry = [...defaultModelsToTry];
+      }
+
+
+      // Try using Gemini models with generateContent (may not support image generation but worth trying)
+      for (const modelName of modelsToTry) {
+        try {
+          console.log(`🎨 Trying model: ${modelName}...`);
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
+          
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: prompt
+                }]
+              }],
+              generationConfig: {
+                temperature: 0.7,
+              }
+            }),
+          });
+
+          const responseText = await response.text();
+          
+          if (!response.ok) {
+            // If 404, try next model
+            if (response.status === 404) {
+              console.log(`⚠️ Model ${modelName} not found, trying next...`);
+              continue;
+            }
+            throw new Error(`API returned status ${response.status}: ${responseText}`);
+          }
+
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch (parseError) {
+            console.error('❌ Failed to parse JSON response:', responseText);
+            continue; // Try next model
+          }
+          
+          // Parse response format
+          if (data.candidates && data.candidates[0]) {
+            const candidate = data.candidates[0];
+            if (candidate.content && candidate.content.parts) {
+              for (const part of candidate.content.parts) {
+                if (part.inlineData && part.inlineData.data) {
+                  const mimeType = part.inlineData.mimeType || 'image/png';
+                  console.log(`✅ Successfully generated image using model: ${modelName}`);
+                  return `data:${mimeType};base64,${part.inlineData.data}`;
+                }
+              }
+            }
+          }
+
+          // Check for alternative response format
+          if (data.generatedImages && data.generatedImages[0]) {
+            const imageBase64 = data.generatedImages[0].imageBase64 || 
+                               data.generatedImages[0].bytesBase64Encoded ||
+                               data.generatedImages[0].bytes;
+            if (imageBase64) {
+              console.log(`✅ Successfully generated image using model: ${modelName}`);
+              return `data:image/png;base64,${imageBase64}`;
+            }
+          }
+        } catch (modelError) {
+          console.log(`⚠️ Model ${modelName} failed:`, modelError instanceof Error ? modelError.message : String(modelError));
+          lastError = modelError instanceof Error ? modelError : new Error(String(modelError));
+          continue; // Try next model
         }
       }
 
-      // Check for images array
-      if (data.images && data.images[0]) {
-        const imageBase64 = data.images[0].base64 || data.images[0].imageBase64;
-        if (imageBase64) {
-          return `data:image/png;base64,${imageBase64}`;
-        }
-      }
+      // If all models failed, provide helpful error message
+      console.error('❌ All image generation attempts failed');
+      throw new Error(`Image generation failed. The gemini-2.0-flash-preview-image-generation model was deprecated.
+      
+Troubleshooting steps:
+1. Use Google's Imagen API instead (requires separate setup): https://cloud.google.com/vertex-ai/docs/generative-ai/image/generate-images
+2. Check available models by calling the listAvailableModels() method
+3. Consider using a third-party image generation service (OpenAI DALL-E, Stability AI, etc.)
+4. Your Gemini API key may need different permissions for image generation
 
-      // If we get a different format, log it for debugging
-      console.error('Unexpected response format:', JSON.stringify(data, null, 2));
-      throw new Error('Invalid response format from Gemini API. Check logs for actual response.');
+Last error: ${lastError?.message || 'Unknown error'}
+
+Alternative: Use the generateEnhancedPrompt() method to create a detailed prompt for use with other image generation services.`);
     } catch (error) {
-      console.error('Error generating image:', error);
-      if (error instanceof Error && error.message.includes('alternative')) {
-        throw error; // Re-throw if already tried alternative
-      }
+      console.error('❌ Error generating image:', error);
       throw error;
     }
   }
 
-  /**
-   * Try alternative endpoint format (Imagen 4 or different API version)
-   */
-  private async tryAlternativeEndpoint(prompt: string): Promise<string> {
-    try {
-        // Try Imagen 4 endpoint
-      const API_KEY = getApiKey();
-      const alternativeEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:generateImages?key=${API_KEY}`;
-      
-      const response = await fetch(alternativeEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: prompt,
-          number_of_images: 1,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`Image generation failed on both endpoints. Status: ${response.status}. Error: ${errorData}`);
-      }
-
-      const data = await response.json();
-      
-      // Same response parsing logic
-      if (data.generatedImages?.[0]?.imageBase64 || data.generatedImages?.[0]?.bytesBase64Encoded) {
-        return `data:image/png;base64,${data.generatedImages[0].imageBase64 || data.generatedImages[0].bytesBase64Encoded}`;
-      }
-      
-      throw new Error('Alternative endpoint returned invalid format');
-    } catch (error) {
-      throw new Error(`Image generation failed. Please check:
-1. Your Gemini API key is valid and has Imagen access
-2. The API endpoint format in src/services/geminiService.ts matches Google's current documentation
-3. Your free tier includes image generation capabilities
-Error: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
 
   /**
    * Alternative method: Use Gemini to generate an enhanced prompt
    * This can be used with other image generation services
    */
   async generateEnhancedPrompt(character: CharacterData): Promise<string> {
-    try {
-      const model = getGenAI().getGenerativeModel({ model: 'gemini-pro' });
-      
-      const basePrompt = this.generateImagePrompt(character);
-      const enhancementPrompt = `Enhance this image generation prompt to be more detailed and vivid: ${basePrompt}
+    const basePrompt = this.generateImagePrompt(character);
+    const enhancementPrompt = `Enhance this image generation prompt to be more detailed and vivid: ${basePrompt}
       
 Return ONLY the enhanced prompt, nothing else.`;
 
-      const result = await model.generateContent(enhancementPrompt);
-      const response = await result.response;
-      const enhancedPrompt = response.text();
-      
-      return enhancedPrompt.trim();
-    } catch (error) {
-      console.error('Error generating enhanced prompt:', error);
-      return this.generateImagePrompt(character); // Fallback to original
+    // Try multiple model names
+    const modelsToTry = [
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-pro'
+    ];
+
+    for (const modelName of modelsToTry) {
+      try {
+        const model = getGenAI().getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(enhancementPrompt);
+        const response = await result.response;
+        const enhancedPrompt = response.text();
+        return enhancedPrompt.trim();
+      } catch (error) {
+        // Try next model if this one fails
+        if (error instanceof Error && (
+          error.message.includes('404') || 
+          error.message.includes('not found') ||
+          error.message.includes('is not supported')
+        )) {
+          continue;
+        }
+        // For other errors, log and try next
+        console.log(`⚠️ Model ${modelName} failed for prompt enhancement, trying next...`);
+        continue;
+      }
     }
+
+    // Fallback to original prompt if all models fail
+    console.error('❌ All models failed for prompt enhancement, using original prompt');
+    return basePrompt;
+  }
+
+  /**
+   * Generate a short story about a Star Wars character using Gemini API
+   * Tries multiple model names to ensure compatibility
+   */
+  async generateCharacterStory(character: CharacterData): Promise<string> {
+    const storyPrompt = `Write a short, engaging story (300-500 words) about ${character.name}, a Star Wars character.
+
+Character details:
+- Name: ${character.name}
+- Height: ${character.height} cm
+- Mass: ${character.mass} kg
+- Hair color: ${character.hair_color}
+- Skin color: ${character.skin_color}
+- Eye color: ${character.eye_color}
+- Gender: ${character.gender}
+- Birth year: ${character.birth_year}
+
+Write an imaginative, Star Wars-themed short story that brings this character to life. 
+The story should be engaging, well-written, and capture the essence of the Star Wars universe.
+Make it dramatic, adventurous, and true to the Star Wars style.`;
+
+    // Try multiple model names in order of preference
+    const modelsToTry = [
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-pro',
+      'gemini-2.0-flash-exp',
+      'gemini-2.5-flash'
+    ];
+
+    let lastError: Error | null = null;
+
+    console.log('📖 Generating story for:', character.name);
+
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`📖 Trying model: ${modelName}...`);
+        const model = getGenAI().getGenerativeModel({ model: modelName });
+        
+        const result = await model.generateContent(storyPrompt);
+        const response = await result.response;
+        const story = response.text();
+        
+        console.log(`✅ Story generated successfully using model: ${modelName}`);
+        return story.trim();
+      } catch (error) {
+        console.log(`⚠️ Model ${modelName} failed:`, error instanceof Error ? error.message : String(error));
+        lastError = error instanceof Error ? error : new Error(String(error));
+        
+        // If it's a 404, try next model
+        if (error instanceof Error && (
+          error.message.includes('404') || 
+          error.message.includes('not found') ||
+          error.message.includes('is not supported')
+        )) {
+          continue; // Try next model
+        }
+        
+        // For other errors (like quota), we might want to try other models too
+        // but if it's clearly a model-not-found error, continue
+        if (error instanceof Error && error.message.includes('models/')) {
+          continue;
+        }
+      }
+    }
+
+    // If all models failed, throw helpful error
+    console.error('❌ All model attempts failed for story generation');
+    if (lastError) {
+      if (lastError.message.includes('429') || lastError.message.includes('quota') || lastError.message.includes('RESOURCE_EXHAUSTED')) {
+        throw new Error(`Story generation failed due to API quota limits. Please try again later. Original error: ${lastError.message}`);
+      }
+      throw new Error(`Failed to generate story: ${lastError.message}`);
+    }
+    throw new Error('Failed to generate character story. Please check your API key and model availability.');
   }
 }
 

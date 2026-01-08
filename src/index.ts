@@ -6,6 +6,7 @@ import express, { Express } from 'express';
 import cors from 'cors';
 import { connectDatabase } from './config/database';
 import imageRoutes from './routes/imageRoutes';
+import storyRoutes from './routes/storyRoutes';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -26,6 +27,7 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/images', imageRoutes);
+app.use('/api/stories', storyRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -50,7 +52,8 @@ async function startServer() {
     // Start Express server
     app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
-      console.log(`📡 API endpoint: http://localhost:${PORT}/api/images`);
+      console.log(`📡 Image API endpoint: http://localhost:${PORT}/api/images`);
+      console.log(`📖 Story API endpoint: http://localhost:${PORT}/api/stories`);
       console.log(`🌐 Frontend URL: ${FRONTEND_URL}`);
     });
   } catch (error) {
