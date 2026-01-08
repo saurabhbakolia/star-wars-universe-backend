@@ -1,12 +1,26 @@
 // Load environment variables FIRST, before any other imports
 import dotenv from 'dotenv';
-dotenv.config();
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+// Get __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env file from backend directory
+dotenv.config({ path: resolve(__dirname, '../.env') });
+
+// Log API key status (without exposing full keys)
+console.log('🔑 Environment variables loaded:');
+console.log('   GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? `✅ Set (${process.env.GEMINI_API_KEY.substring(0, 10)}...)` : '❌ Not set');
+console.log('   OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? `✅ Set (${process.env.OPENAI_API_KEY.substring(0, 10)}...)` : '❌ Not set');
 
 import express, { Express } from 'express';
 import cors from 'cors';
 import { connectDatabase } from './config/database';
 import imageRoutes from './routes/imageRoutes';
 import storyRoutes from './routes/storyRoutes';
+import animeSketchRoutes from './routes/animeSketchRoutes';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -28,6 +42,7 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/images', imageRoutes);
 app.use('/api/stories', storyRoutes);
+app.use('/api/anime-sketch', animeSketchRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
