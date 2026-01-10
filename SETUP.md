@@ -4,7 +4,7 @@
 
 1. **Create `.env` file** in the backend directory:
 ```env
-GEMINI_API_KEY=AIzaSyAc2h_xhE89OSiADjF1jv7ShuPPzHgE-o8
+GEMINI_API_KEY=your-gemini-api-key
 PORT=3001
 FRONTEND_URL=http://localhost:5173
 ```
@@ -70,3 +70,4 @@ The current implementation tries multiple endpoint formats automatically.
 - MongoDB is optional - app works without it
 - If you want caching, install MongoDB or use Atlas
 - Or remove MONGODB_URI from `.env` to disable caching
+
